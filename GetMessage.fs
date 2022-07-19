@@ -10,27 +10,52 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
-{
-    public static class GetMessage
-    {
-        [FunctionName("GetMessage")]
-        public static async Task<IActionResult> Run(
-            [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req,
-            ILogger log)
-        {
-            log.LogInformation("C# HTTP trigger function processed a request.");
+module GetMessage =
+    // Define a nullable container to deserialize into.
+    [<AllowNullLiteral>]
+    type NameContainer() =
+        member val Name = "" with get, set
 
-            string name = req.Query["name"];
+    // For convenience, it's better to have a central place for the literal.
+    [<Literal>]
+    let Name = "name"
 
-            string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-            dynamic data = JsonConvert.DeserializeObject(requestBody);
-            name = name ?? data?.name;
+    [<FunctionName("GetMessage")>]
+    let run
+        ([<HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)>] req: HttpRequest)
+        (log: ILogger)
+        =
+        async {
+            log.LogInformation("F# HTTP trigger function processed a request.")
 
-            string responseMessage = string.IsNullOrEmpty(name)
-                ? "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response."
-                : $"Hello, {name}. This HTTP triggered function executed successfully.";
+            let nameOpt =
+                if req.Query.ContainsKey(Name) then
+                    Some(req.Query.[Name].[0])
+                else
+                    None
 
-            return new OkObjectResult(responseMessage);
+            use stream = new StreamReader(req.Body)
+            let! reqBody = stream.ReadToEndAsync() |> Async.AwaitTask
+
+            let data =
+                JsonConvert.DeserializeObject<NameContainer>(reqBody)
+
+            let name =
+                match nameOpt with
+                | Some n -> n
+                | None ->
+                    match data with
+                    | null -> ""
+                    | nc -> nc.Name
+
+            let responseMessage =
+                if (String.IsNullOrWhiteSpace(name)) then
+                    "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response."
+                else
+                    "Hello, "
+                    + name
+                    + ". This HTTP triggered function executed successfully."
+
+            return OkObjectResult(responseMessage) :> IActionResult
         }
-    }
-}
+        |> Async.StartAsTask
